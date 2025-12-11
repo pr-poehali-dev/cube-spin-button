@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import Icon from '@/components/ui/icon';
 
 interface DiceRoll {
@@ -38,13 +40,21 @@ const Index = () => {
     return [];
   });
   const [showMenu, setShowMenu] = useState(true);
-  const [leaders] = useState<Leader[]>([
-    { name: 'Игрок 1', score: 156, rolls: 32 },
-    { name: 'Игрок 2', score: 142, rolls: 28 },
-    { name: 'Игрок 3', score: 128, rolls: 25 },
-    { name: 'Игрок 4', score: 115, rolls: 24 },
-    { name: 'Игрок 5', score: 98, rolls: 20 }
-  ]);
+  const [showSaveScore, setShowSaveScore] = useState(false);
+  const [playerName, setPlayerName] = useState('');
+  const [leaders, setLeaders] = useState<Leader[]>(() => {
+    const saved = localStorage.getItem('diceGame_leaders');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+    return [
+      { name: 'Игрок 1', score: 156, rolls: 32 },
+      { name: 'Игрок 2', score: 142, rolls: 28 },
+      { name: 'Игрок 3', score: 128, rolls: 25 },
+      { name: 'Игрок 4', score: 115, rolls: 24 },
+      { name: 'Игрок 5', score: 98, rolls: 20 }
+    ];
+  });
 
   useEffect(() => {
     const audio = new Audio();
@@ -62,6 +72,10 @@ const Index = () => {
   useEffect(() => {
     localStorage.setItem('diceGame_history', JSON.stringify(history));
   }, [history]);
+
+  useEffect(() => {
+    localStorage.setItem('diceGame_leaders', JSON.stringify(leaders));
+  }, [leaders]);
 
   const rollDice = () => {
     if (isRolling) return;
@@ -112,12 +126,43 @@ const Index = () => {
   };
 
   const resetGame = () => {
+    if (totalScore > 0 && rollCount >= 5) {
+      setShowSaveScore(true);
+    } else {
+      confirmReset();
+    }
+  };
+
+  const confirmReset = () => {
     setTotalScore(0);
     setRollCount(0);
     setHistory([]);
     localStorage.removeItem('diceGame_totalScore');
     localStorage.removeItem('diceGame_rollCount');
     localStorage.removeItem('diceGame_history');
+    setShowSaveScore(false);
+    setPlayerName('');
+  };
+
+  const saveScore = () => {
+    if (!playerName.trim()) return;
+    
+    const newLeader: Leader = {
+      name: playerName.trim(),
+      score: totalScore,
+      rolls: rollCount
+    };
+    
+    const updatedLeaders = [...leaders, newLeader]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+    
+    setLeaders(updatedLeaders);
+    confirmReset();
+  };
+
+  const skipSave = () => {
+    confirmReset();
   };
 
   if (showMenu) {
@@ -181,6 +226,8 @@ const Index = () => {
       </div>
     );
   }
+
+  const isInTopLeaders = totalScore > 0 && rollCount >= 5 && (leaders.length < 10 || totalScore > leaders[leaders.length - 1].score);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-game-dark via-[#252a3a] to-game-dark p-4 md:p-8">
@@ -401,6 +448,69 @@ const Index = () => {
           </div>
         </div>
       </div>
+
+      <Dialog open={showSaveScore} onOpenChange={setShowSaveScore}>
+        <DialogContent className="bg-card border-primary/20">
+          <DialogHeader>
+            <DialogTitle className="text-2xl text-center">
+              {isInTopLeaders ? '🏆 Отличный результат!' : '🎲 Завершить игру?'}
+            </DialogTitle>
+            <DialogDescription className="text-center text-lg">
+              {isInTopLeaders 
+                ? 'Вы попали в топ! Сохраните свой результат в таблице лидеров.'
+                : 'Хотите сохранить свой результат?'}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="flex justify-around text-center bg-secondary p-4 rounded-lg">
+              <div>
+                <p className="text-3xl font-bold text-primary">{totalScore}</p>
+                <p className="text-sm text-muted-foreground">Очков</p>
+              </div>
+              <div>
+                <p className="text-3xl font-bold text-accent">{rollCount}</p>
+                <p className="text-sm text-muted-foreground">Бросков</p>
+              </div>
+              <div>
+                <p className="text-3xl font-bold text-primary">{rollCount > 0 ? (totalScore / rollCount).toFixed(1) : '0'}</p>
+                <p className="text-sm text-muted-foreground">Средний</p>
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Ваше имя</label>
+              <Input
+                placeholder="Введите имя"
+                value={playerName}
+                onChange={(e) => setPlayerName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && playerName.trim() && saveScore()}
+                className="h-12 text-lg"
+                maxLength={20}
+                autoFocus
+              />
+            </div>
+          </div>
+          
+          <DialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={skipSave}
+              className="flex-1"
+            >
+              Пропустить
+            </Button>
+            <Button
+              onClick={saveScore}
+              disabled={!playerName.trim()}
+              className="flex-1 bg-primary hover:bg-primary/90"
+            >
+              <Icon name="Trophy" className="mr-2" size={20} />
+              Сохранить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
