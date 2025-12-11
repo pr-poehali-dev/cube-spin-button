@@ -28,6 +28,17 @@ interface Buff {
   remaining: number;
 }
 
+interface Upgrade {
+  id: string;
+  name: string;
+  description: string;
+  cost: number;
+  icon: string;
+  level: number;
+  maxLevel: number;
+  owned: boolean;
+}
+
 const Index = () => {
   const [currentValue, setCurrentValue] = useState(1);
   const [isRolling, setIsRolling] = useState(false);
@@ -53,10 +64,33 @@ const Index = () => {
   const [showMenu, setShowMenu] = useState(true);
   const [showSaveScore, setShowSaveScore] = useState(false);
   const [showShop, setShowShop] = useState(false);
+  const [showUpgradeShop, setShowUpgradeShop] = useState(false);
+  const [showNicknameInput, setShowNicknameInput] = useState(false);
   const [playerName, setPlayerName] = useState('');
+  const [currentNickname, setCurrentNickname] = useState(() => {
+    const saved = localStorage.getItem('diceGame_nickname');
+    return saved || '';
+  });
+  const [tempNickname, setTempNickname] = useState('');
   const [coins, setCoins] = useState(() => {
     const saved = localStorage.getItem('diceGame_coins');
     return saved ? parseInt(saved) : 100;
+  });
+  const [gems, setGems] = useState(() => {
+    const saved = localStorage.getItem('diceGame_gems');
+    return saved ? parseInt(saved) : 0;
+  });
+  const [upgrades, setUpgrades] = useState<Upgrade[]>(() => {
+    const saved = localStorage.getItem('diceGame_upgrades');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+    return [
+      { id: 'luck_boost', name: 'Постоянная удача', description: 'Шанс на 10 +0.5% за уровень', cost: 100, icon: 'Star', level: 0, maxLevel: 5, owned: false },
+      { id: 'coin_multiplier', name: 'Множитель монет', description: '+1 монета за бросок за уровень', cost: 80, icon: 'TrendingUp', level: 0, maxLevel: 10, owned: false },
+      { id: 'score_boost', name: 'Бонус очков', description: '+10% очков за уровень', cost: 120, icon: 'Zap', level: 0, maxLevel: 5, owned: false },
+      { id: 'starting_coins', name: 'Стартовые монеты', description: '+50 монет при старте за уровень', cost: 150, icon: 'Wallet', level: 0, maxLevel: 3, owned: false }
+    ];
   });
   const [buffs, setBuffs] = useState<Buff[]>(() => {
     const saved = localStorage.getItem('diceGame_buffs');
@@ -114,17 +148,31 @@ const Index = () => {
     localStorage.setItem('diceGame_buffs', JSON.stringify(buffs));
   }, [buffs]);
 
+  useEffect(() => {
+    localStorage.setItem('diceGame_gems', gems.toString());
+  }, [gems]);
+
+  useEffect(() => {
+    localStorage.setItem('diceGame_upgrades', JSON.stringify(upgrades));
+  }, [upgrades]);
+
+  useEffect(() => {
+    if (currentNickname) {
+      localStorage.setItem('diceGame_nickname', currentNickname);
+    }
+  }, [currentNickname]);
+
   const getWeightedDiceRoll = () => {
     const luckBuff = buffs.find(b => b.id === 'luck' && b.active);
+    const luckUpgrade = upgrades.find(u => u.id === 'luck_boost');
     const rand = Math.random() * 100;
     
-    if (luckBuff) {
-      if (rand < 5) return 10;
-      return Math.floor(Math.random() * 9) + 1;
-    } else {
-      if (rand < 1) return 10;
-      return Math.floor(Math.random() * 9) + 1;
-    }
+    let luckChance = 1;
+    if (luckBuff) luckChance = 5;
+    if (luckUpgrade) luckChance += luckUpgrade.level * 0.5;
+    
+    if (rand < luckChance) return 10;
+    return Math.floor(Math.random() * 9) + 1;
   };
 
   const rollDice = (isReroll = false) => {
@@ -150,9 +198,15 @@ const Index = () => {
         const doubleBuff = buffs.find(b => b.id === 'double' && b.active);
         const bonusCoinsBuff = buffs.find(b => b.id === 'bonus' && b.active);
         const rerollBuff = buffs.find(b => b.id === 'reroll' && b.active);
+        const scoreUpgrade = upgrades.find(u => u.id === 'score_boost');
+        const coinUpgrade = upgrades.find(u => u.id === 'coin_multiplier');
         
-        const scoreToAdd = doubleBuff ? finalValue * 2 : finalValue;
-        const coinsToAdd = 1 + (bonusCoinsBuff ? 2 : 0) + (finalValue === 10 ? 10 : 0);
+        let scoreToAdd = finalValue;
+        if (doubleBuff) scoreToAdd *= 2;
+        if (scoreUpgrade) scoreToAdd = Math.floor(scoreToAdd * (1 + scoreUpgrade.level * 0.1));
+        
+        const baseCoins = 1 + (coinUpgrade ? coinUpgrade.level : 0);
+        const coinsToAdd = baseCoins + (bonusCoinsBuff ? 2 : 0) + (finalValue === 10 ? 10 : 0);
         
         setTotalScore(prev => prev + scoreToAdd);
         setCoins(prev => prev + coinsToAdd);
@@ -190,6 +244,17 @@ const Index = () => {
   };
 
   const startGame = () => {
+    if (!currentNickname) {
+      setShowNicknameInput(true);
+    } else {
+      setShowMenu(false);
+    }
+  };
+
+  const saveNickname = () => {
+    if (!tempNickname.trim()) return;
+    setCurrentNickname(tempNickname.trim());
+    setShowNicknameInput(false);
     setShowMenu(false);
   };
 
@@ -202,10 +267,16 @@ const Index = () => {
   };
 
   const confirmReset = () => {
+    const startingCoinsUpgrade = upgrades.find(u => u.id === 'starting_coins');
+    const bonusCoins = startingCoinsUpgrade ? startingCoinsUpgrade.level * 50 : 0;
+    
     setTotalScore(0);
     setRollCount(0);
     setHistory([]);
     setCanReroll(false);
+    if (bonusCoins > 0) {
+      setCoins(prev => prev + bonusCoins);
+    }
     localStorage.removeItem('diceGame_totalScore');
     localStorage.removeItem('diceGame_rollCount');
     localStorage.removeItem('diceGame_history');
@@ -225,11 +296,23 @@ const Index = () => {
     setShowShop(false);
   };
 
+  const buyUpgrade = (upgradeId: string) => {
+    const upgrade = upgrades.find(u => u.id === upgradeId);
+    if (!upgrade || gems < upgrade.cost || upgrade.level >= upgrade.maxLevel) return;
+    
+    setGems(prev => prev - upgrade.cost);
+    const updatedUpgrades = upgrades.map(u => 
+      u.id === upgradeId ? { ...u, level: u.level + 1, owned: true } : u
+    );
+    setUpgrades(updatedUpgrades);
+  };
+
   const saveScore = () => {
-    if (!playerName.trim()) return;
+    const name = currentNickname || playerName.trim();
+    if (!name) return;
     
     const newLeader: Leader = {
-      name: playerName.trim(),
+      name: name,
       score: totalScore,
       rolls: rollCount
     };
@@ -237,6 +320,22 @@ const Index = () => {
     const updatedLeaders = [...leaders, newLeader]
       .sort((a, b) => b.score - a.score)
       .slice(0, 10);
+    
+    const playerPosition = updatedLeaders.findIndex(l => l.name === name && l.score === totalScore);
+    
+    if (playerPosition === 0) {
+      setGems(prev => prev + 150);
+      setCoins(prev => prev + 500);
+    } else if (playerPosition === 1) {
+      setGems(prev => prev + 125);
+      setCoins(prev => prev + 400);
+    } else if (playerPosition === 2) {
+      setGems(prev => prev + 100);
+      setCoins(prev => prev + 300);
+    } else if (playerPosition === 3) {
+      setGems(prev => prev + 75);
+      setCoins(prev => prev + 250);
+    }
     
     setLeaders(updatedLeaders);
     confirmReset();
@@ -254,8 +353,28 @@ const Index = () => {
             <div className="space-y-2">
               <h1 className="text-6xl font-bold text-primary mb-2">🎲</h1>
               <h2 className="text-4xl font-bold text-foreground">Dice Game</h2>
+              {currentNickname && (
+                <p className="text-primary font-semibold">Игрок: {currentNickname}</p>
+              )}
               <p className="text-muted-foreground">Бросай кубик и набирай очки!</p>
             </div>
+
+            {currentNickname && (
+              <div className="flex justify-center gap-4">
+                <Card className="bg-accent/20 border-accent/30 px-4 py-2">
+                  <div className="flex items-center gap-2">
+                    <Icon name="Gem" size={20} className="text-accent" />
+                    <span className="font-bold text-accent">{gems}</span>
+                  </div>
+                </Card>
+                <Card className="bg-primary/20 border-primary/30 px-4 py-2">
+                  <div className="flex items-center gap-2">
+                    <Icon name="Coins" size={20} className="text-primary" />
+                    <span className="font-bold text-primary">{coins}</span>
+                  </div>
+                </Card>
+              </div>
+            )}
 
             {(totalScore > 0 || rollCount > 0) && (
               <Card className="bg-primary/10 border-primary/30 p-4">
@@ -286,21 +405,30 @@ const Index = () => {
                 Играть
               </Button>
               
-              <Button 
-                variant="outline"
-                className="w-full h-14 text-lg font-semibold border-primary/30 hover:bg-primary/10"
-              >
-                <Icon name="Settings" className="mr-2" size={24} />
-                Настройки
-              </Button>
+              {currentNickname && (
+                <Button 
+                  variant="outline"
+                  onClick={() => setShowUpgradeShop(true)}
+                  className="w-full h-14 text-lg font-semibold border-accent/30 hover:bg-accent/10 text-accent"
+                >
+                  <Icon name="Gem" className="mr-2" size={24} />
+                  Улучшения ({gems} гемов)
+                </Button>
+              )}
               
-              <Button 
-                variant="outline"
-                className="w-full h-14 text-lg font-semibold border-primary/30 hover:bg-primary/10"
-              >
-                <Icon name="LogOut" className="mr-2" size={24} />
-                Выход
-              </Button>
+              {currentNickname && (
+                <Button 
+                  variant="outline"
+                  onClick={() => {
+                    setCurrentNickname('');
+                    localStorage.removeItem('diceGame_nickname');
+                  }}
+                  className="w-full h-14 text-lg font-semibold border-destructive/30 hover:bg-destructive/10 text-destructive"
+                >
+                  <Icon name="LogOut" className="mr-2" size={24} />
+                  Сменить игрока
+                </Button>
+              )}
             </div>
           </div>
         </Card>
@@ -592,18 +720,27 @@ const Index = () => {
               </div>
             </div>
             
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Ваше имя</label>
-              <Input
-                placeholder="Введите имя"
-                value={playerName}
-                onChange={(e) => setPlayerName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && playerName.trim() && saveScore()}
-                className="h-12 text-lg"
-                maxLength={20}
-                autoFocus
-              />
-            </div>
+            {currentNickname && (
+              <div className="text-center bg-primary/10 p-3 rounded-lg">
+                <p className="text-sm text-muted-foreground">Играет</p>
+                <p className="text-xl font-bold text-primary">{currentNickname}</p>
+              </div>
+            )}
+            
+            {!currentNickname && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Ваше имя</label>
+                <Input
+                  placeholder="Введите имя"
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && playerName.trim() && saveScore()}
+                  className="h-12 text-lg"
+                  maxLength={20}
+                  autoFocus
+                />
+              </div>
+            )}
           </div>
           
           <DialogFooter className="flex gap-2">
@@ -616,7 +753,7 @@ const Index = () => {
             </Button>
             <Button
               onClick={saveScore}
-              disabled={!playerName.trim()}
+              disabled={!currentNickname && !playerName.trim()}
               className="flex-1 bg-primary hover:bg-primary/90"
             >
               <Icon name="Trophy" className="mr-2" size={20} />
@@ -681,6 +818,109 @@ const Index = () => {
               💡 <strong>Совет:</strong> Зарабатывайте монеты за каждый бросок. За выпадение 10 получаете бонус +10 монет!
             </p>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showUpgradeShop} onOpenChange={setShowUpgradeShop}>
+        <DialogContent className="bg-card border-accent/30 max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl text-center flex items-center justify-center gap-2">
+              <Icon name="Gem" size={28} className="text-accent" />
+              Магазин улучшений
+            </DialogTitle>
+            <DialogDescription className="text-center">
+              Постоянные улучшения за гемы. У вас: <span className="text-accent font-bold text-lg">{gems} <Icon name="Gem" className="inline" size={16} /></span> гемов
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-4">
+            {upgrades.map(upgrade => (
+              <Card key={upgrade.id} className={`p-4 ${upgrade.level > 0 ? 'bg-accent/10 border-accent/30' : 'bg-secondary border-primary/20'}`}>
+                <div className="flex items-start gap-3 mb-3">
+                  <div className={`p-2 rounded-lg ${upgrade.level > 0 ? 'bg-accent/20' : 'bg-primary/20'}`}>
+                    <Icon name={upgrade.icon as any} size={24} className={upgrade.level > 0 ? 'text-accent' : 'text-primary'} />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-bold text-lg flex items-center gap-2">
+                      {upgrade.name}
+                      {upgrade.level > 0 && (
+                        <span className="text-xs bg-accent/20 text-accent px-2 py-0.5 rounded">
+                          Ур. {upgrade.level}/{upgrade.maxLevel}
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-sm text-muted-foreground">{upgrade.description}</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1 text-accent font-bold">
+                    <Icon name="Gem" size={18} />
+                    {upgrade.cost}
+                  </div>
+                  <Button
+                    onClick={() => buyUpgrade(upgrade.id)}
+                    disabled={upgrade.level >= upgrade.maxLevel || gems < upgrade.cost}
+                    size="sm"
+                    className="bg-accent hover:bg-accent/90"
+                  >
+                    {upgrade.level >= upgrade.maxLevel ? 'Макс' : gems < upgrade.cost ? 'Мало гемов' : 'Улучшить'}
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+          
+          <div className="bg-accent/10 border border-accent/20 p-4 rounded-lg space-y-2">
+            <p className="text-sm text-center font-semibold text-accent">
+              💎 Как получить гемы?
+            </p>
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>🥇 1 место в таблице лидеров: <span className="text-accent font-bold">150 гемов + 500 монет</span></p>
+              <p>🥈 2 место в таблице лидеров: <span className="text-accent font-bold">125 гемов + 400 монет</span></p>
+              <p>🥉 3 место в таблице лидеров: <span className="text-accent font-bold">100 гемов + 300 монет</span></p>
+              <p>🏅 4 место в таблице лидеров: <span className="text-accent font-bold">75 гемов + 250 монет</span></p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showNicknameInput} onOpenChange={setShowNicknameInput}>
+        <DialogContent className="bg-card border-primary/20">
+          <DialogHeader>
+            <DialogTitle className="text-2xl text-center">
+              👋 Добро пожаловать!
+            </DialogTitle>
+            <DialogDescription className="text-center">
+              Введите свой никнейм, чтобы начать игру и попасть в таблицу лидеров
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Ваш никнейм</label>
+              <Input
+                placeholder="Введите никнейм"
+                value={tempNickname}
+                onChange={(e) => setTempNickname(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && tempNickname.trim() && saveNickname()}
+                className="h-12 text-lg"
+                maxLength={20}
+                autoFocus
+              />
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button
+              onClick={saveNickname}
+              disabled={!tempNickname.trim()}
+              className="w-full bg-primary hover:bg-primary/90"
+            >
+              <Icon name="Play" className="mr-2" size={20} />
+              Начать игру
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
