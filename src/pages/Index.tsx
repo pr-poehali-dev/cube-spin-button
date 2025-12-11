@@ -18,9 +18,25 @@ interface Leader {
 const Index = () => {
   const [currentValue, setCurrentValue] = useState(1);
   const [isRolling, setIsRolling] = useState(false);
-  const [totalScore, setTotalScore] = useState(0);
-  const [rollCount, setRollCount] = useState(0);
-  const [history, setHistory] = useState<DiceRoll[]>([]);
+  const [totalScore, setTotalScore] = useState(() => {
+    const saved = localStorage.getItem('diceGame_totalScore');
+    return saved ? parseInt(saved) : 0;
+  });
+  const [rollCount, setRollCount] = useState(() => {
+    const saved = localStorage.getItem('diceGame_rollCount');
+    return saved ? parseInt(saved) : 0;
+  });
+  const [history, setHistory] = useState<DiceRoll[]>(() => {
+    const saved = localStorage.getItem('diceGame_history');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return parsed.map((roll: any) => ({
+        ...roll,
+        timestamp: new Date(roll.timestamp)
+      }));
+    }
+    return [];
+  });
   const [showMenu, setShowMenu] = useState(true);
   const [leaders] = useState<Leader[]>([
     { name: 'Игрок 1', score: 156, rolls: 32 },
@@ -34,6 +50,18 @@ const Index = () => {
     const audio = new Audio();
     audio.volume = 0.3;
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('diceGame_totalScore', totalScore.toString());
+  }, [totalScore]);
+
+  useEffect(() => {
+    localStorage.setItem('diceGame_rollCount', rollCount.toString());
+  }, [rollCount]);
+
+  useEffect(() => {
+    localStorage.setItem('diceGame_history', JSON.stringify(history));
+  }, [history]);
 
   const rollDice = () => {
     if (isRolling) return;
@@ -81,9 +109,15 @@ const Index = () => {
 
   const startGame = () => {
     setShowMenu(false);
+  };
+
+  const resetGame = () => {
     setTotalScore(0);
     setRollCount(0);
     setHistory([]);
+    localStorage.removeItem('diceGame_totalScore');
+    localStorage.removeItem('diceGame_rollCount');
+    localStorage.removeItem('diceGame_history');
   };
 
   if (showMenu) {
@@ -96,6 +130,26 @@ const Index = () => {
               <h2 className="text-4xl font-bold text-foreground">Dice Game</h2>
               <p className="text-muted-foreground">Бросай кубик и набирай очки!</p>
             </div>
+
+            {(totalScore > 0 || rollCount > 0) && (
+              <Card className="bg-primary/10 border-primary/30 p-4">
+                <p className="text-sm text-muted-foreground mb-2">Сохраненный прогресс</p>
+                <div className="flex justify-around text-center">
+                  <div>
+                    <p className="text-2xl font-bold text-primary">{totalScore}</p>
+                    <p className="text-xs text-muted-foreground">Очков</p>
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-accent">{rollCount}</p>
+                    <p className="text-xs text-muted-foreground">Бросков</p>
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-primary">{rollCount > 0 ? (totalScore / rollCount).toFixed(1) : '0'}</p>
+                    <p className="text-xs text-muted-foreground">Средний</p>
+                  </div>
+                </div>
+              </Card>
+            )}
             
             <div className="space-y-3">
               <Button 
@@ -184,14 +238,25 @@ const Index = () => {
 
       <div className="max-w-7xl mx-auto">
         <div className="flex justify-between items-center mb-8">
-          <Button
-            variant="outline"
-            onClick={() => setShowMenu(true)}
-            className="border-primary/30 hover:bg-primary/10"
-          >
-            <Icon name="Menu" className="mr-2" size={20} />
-            Меню
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowMenu(true)}
+              className="border-primary/30 hover:bg-primary/10"
+            >
+              <Icon name="Menu" className="mr-2" size={20} />
+              Меню
+            </Button>
+            
+            <Button
+              variant="outline"
+              onClick={resetGame}
+              className="border-destructive/30 hover:bg-destructive/10 text-destructive"
+            >
+              <Icon name="RotateCcw" className="mr-2" size={20} />
+              Сброс
+            </Button>
+          </div>
           
           <div className="flex gap-4">
             <Card className="bg-card/80 backdrop-blur-xl px-6 py-3 border-primary/20">
