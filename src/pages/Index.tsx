@@ -17,6 +17,17 @@ interface Leader {
   rolls: number;
 }
 
+interface Buff {
+  id: string;
+  name: string;
+  description: string;
+  cost: number;
+  icon: string;
+  duration: number;
+  active: boolean;
+  remaining: number;
+}
+
 const Index = () => {
   const [currentValue, setCurrentValue] = useState(1);
   const [isRolling, setIsRolling] = useState(false);
@@ -41,7 +52,25 @@ const Index = () => {
   });
   const [showMenu, setShowMenu] = useState(true);
   const [showSaveScore, setShowSaveScore] = useState(false);
+  const [showShop, setShowShop] = useState(false);
   const [playerName, setPlayerName] = useState('');
+  const [coins, setCoins] = useState(() => {
+    const saved = localStorage.getItem('diceGame_coins');
+    return saved ? parseInt(saved) : 100;
+  });
+  const [buffs, setBuffs] = useState<Buff[]>(() => {
+    const saved = localStorage.getItem('diceGame_buffs');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+    return [
+      { id: 'luck', name: 'Удача', description: 'Увеличивает шанс на 10 до 5%', cost: 50, icon: 'Sparkles', duration: 10, active: false, remaining: 0 },
+      { id: 'double', name: 'Двойной бросок', description: 'Удваивает очки за бросок', cost: 80, icon: 'Zap', duration: 5, active: false, remaining: 0 },
+      { id: 'bonus', name: 'Бонус монет', description: '+2 монеты за каждый бросок', cost: 60, icon: 'Coins', duration: 15, active: false, remaining: 0 },
+      { id: 'reroll', name: 'Перебросок', description: 'Можно перебросить 1 раз', cost: 30, icon: 'RotateCcw', duration: 1, active: false, remaining: 0 }
+    ];
+  });
+  const [canReroll, setCanReroll] = useState(false);
   const [leaders, setLeaders] = useState<Leader[]>(() => {
     const saved = localStorage.getItem('diceGame_leaders');
     if (saved) {
@@ -77,10 +106,33 @@ const Index = () => {
     localStorage.setItem('diceGame_leaders', JSON.stringify(leaders));
   }, [leaders]);
 
-  const rollDice = () => {
+  useEffect(() => {
+    localStorage.setItem('diceGame_coins', coins.toString());
+  }, [coins]);
+
+  useEffect(() => {
+    localStorage.setItem('diceGame_buffs', JSON.stringify(buffs));
+  }, [buffs]);
+
+  const getWeightedDiceRoll = () => {
+    const luckBuff = buffs.find(b => b.id === 'luck' && b.active);
+    const rand = Math.random() * 100;
+    
+    if (luckBuff) {
+      if (rand < 5) return 10;
+      return Math.floor(Math.random() * 9) + 1;
+    } else {
+      if (rand < 1) return 10;
+      return Math.floor(Math.random() * 9) + 1;
+    }
+  };
+
+  const rollDice = (isReroll = false) => {
     if (isRolling) return;
+    if (isReroll && !canReroll) return;
     
     setIsRolling(true);
+    if (isReroll) setCanReroll(false);
     
     let rollInterval: NodeJS.Timeout;
     const rollDuration = 1000;
@@ -88,37 +140,53 @@ const Index = () => {
     const intervalTime = 50;
 
     rollInterval = setInterval(() => {
-      setCurrentValue(Math.floor(Math.random() * 6) + 1);
+      setCurrentValue(Math.floor(Math.random() * 10) + 1);
       elapsed += intervalTime;
 
       if (elapsed >= rollDuration) {
         clearInterval(rollInterval);
-        const finalValue = Math.floor(Math.random() * 6) + 1;
+        const finalValue = getWeightedDiceRoll();
         setCurrentValue(finalValue);
-        setTotalScore(prev => prev + finalValue);
+        const doubleBuff = buffs.find(b => b.id === 'double' && b.active);
+        const bonusCoinsBuff = buffs.find(b => b.id === 'bonus' && b.active);
+        const rerollBuff = buffs.find(b => b.id === 'reroll' && b.active);
+        
+        const scoreToAdd = doubleBuff ? finalValue * 2 : finalValue;
+        const coinsToAdd = 1 + (bonusCoinsBuff ? 2 : 0) + (finalValue === 10 ? 10 : 0);
+        
+        setTotalScore(prev => prev + scoreToAdd);
+        setCoins(prev => prev + coinsToAdd);
         setRollCount(prev => prev + 1);
         setHistory(prev => [{ id: Date.now(), value: finalValue, timestamp: new Date() }, ...prev.slice(0, 9)]);
+        
+        if (rerollBuff && !isReroll) {
+          setCanReroll(true);
+        }
+        
+        const updatedBuffs = buffs.map(buff => {
+          if (buff.active && buff.remaining > 0) {
+            const newRemaining = buff.remaining - 1;
+            return { ...buff, remaining: newRemaining, active: newRemaining > 0 };
+          }
+          return buff;
+        });
+        setBuffs(updatedBuffs);
+        
         setIsRolling(false);
       }
     }, intervalTime);
   };
 
   const getDiceFace = (value: number) => {
-    const dots = [];
-    const positions: { [key: number]: string[] } = {
-      1: ['center'],
-      2: ['top-left', 'bottom-right'],
-      3: ['top-left', 'center', 'bottom-right'],
-      4: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
-      5: ['top-left', 'top-right', 'center', 'bottom-left', 'bottom-right'],
-      6: ['top-left', 'top-right', 'middle-left', 'middle-right', 'bottom-left', 'bottom-right']
-    };
-
-    positions[value].forEach((pos, idx) => {
-      dots.push(<div key={idx} className={`dice-dot ${pos}`} />);
-    });
-
-    return dots;
+    return (
+      <div className="flex items-center justify-center h-full">
+        <span className={`text-6xl font-bold ${
+          value === 10 ? 'text-accent animate-pulse' : 'text-gray-900'
+        }`}>
+          {value}
+        </span>
+      </div>
+    );
   };
 
   const startGame = () => {
@@ -137,11 +205,24 @@ const Index = () => {
     setTotalScore(0);
     setRollCount(0);
     setHistory([]);
+    setCanReroll(false);
     localStorage.removeItem('diceGame_totalScore');
     localStorage.removeItem('diceGame_rollCount');
     localStorage.removeItem('diceGame_history');
     setShowSaveScore(false);
     setPlayerName('');
+  };
+
+  const buyBuff = (buffId: string) => {
+    const buff = buffs.find(b => b.id === buffId);
+    if (!buff || coins < buff.cost || buff.active) return;
+    
+    setCoins(prev => prev - buff.cost);
+    const updatedBuffs = buffs.map(b => 
+      b.id === buffId ? { ...b, active: true, remaining: b.duration } : b
+    );
+    setBuffs(updatedBuffs);
+    setShowShop(false);
   };
 
   const saveScore = () => {
@@ -247,28 +328,11 @@ const Index = () => {
           background: linear-gradient(135deg, #ffffff 0%, #f0f0f0 100%);
           border: 3px solid #333;
           border-radius: 20px;
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          grid-template-rows: repeat(3, 1fr);
-          padding: 20px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           box-shadow: inset 0 0 30px rgba(0,0,0,0.1);
         }
-
-        .dice-dot {
-          width: 30px;
-          height: 30px;
-          background: #333;
-          border-radius: 50%;
-          box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
-        }
-
-        .dice-dot.top-left { grid-area: 1 / 1; }
-        .dice-dot.top-right { grid-area: 1 / 3; }
-        .dice-dot.middle-left { grid-area: 2 / 1; }
-        .dice-dot.center { grid-area: 2 / 2; }
-        .dice-dot.middle-right { grid-area: 2 / 3; }
-        .dice-dot.bottom-left { grid-area: 3 / 1; }
-        .dice-dot.bottom-right { grid-area: 3 / 3; }
 
         .rolling {
           animation: dice-roll 1s ease-in-out;
@@ -306,6 +370,16 @@ const Index = () => {
           </div>
           
           <div className="flex gap-4">
+            <Card className="bg-accent/20 backdrop-blur-xl px-6 py-3 border-accent/30">
+              <div className="text-center">
+                <p className="text-sm text-muted-foreground mb-1">Монеты</p>
+                <p className="text-3xl font-bold text-accent flex items-center justify-center gap-1">
+                  <Icon name="Coins" size={28} />
+                  {coins}
+                </p>
+              </div>
+            </Card>
+          
             <Card className="bg-card/80 backdrop-blur-xl px-6 py-3 border-primary/20">
               <div className="text-center">
                 <p className="text-sm text-muted-foreground mb-1">Счет</p>
@@ -334,14 +408,54 @@ const Index = () => {
                   </div>
                 </div>
 
-                <Button
-                  onClick={rollDice}
-                  disabled={isRolling}
-                  size="lg"
-                  className="w-full max-w-xs h-16 text-2xl font-bold bg-primary hover:bg-primary/90 shadow-2xl hover:shadow-primary/50 transition-all disabled:opacity-50 animate-pulse-glow"
-                >
-                  {isRolling ? 'Крутится...' : 'Крутить! 🎲'}
-                </Button>
+                <div className="w-full max-w-xs space-y-3">
+                  <Button
+                    onClick={() => rollDice(false)}
+                    disabled={isRolling}
+                    size="lg"
+                    className="w-full h-16 text-2xl font-bold bg-primary hover:bg-primary/90 shadow-2xl hover:shadow-primary/50 transition-all disabled:opacity-50 animate-pulse-glow"
+                  >
+                    {isRolling ? 'Крутится...' : 'Крутить! 🎲'}
+                  </Button>
+
+                  {canReroll && (
+                    <Button
+                      onClick={() => rollDice(true)}
+                      disabled={isRolling}
+                      size="lg"
+                      variant="outline"
+                      className="w-full h-14 text-lg font-semibold border-accent/50 hover:bg-accent/10 text-accent animate-fade-in"
+                    >
+                      <Icon name="RotateCcw" className="mr-2" size={20} />
+                      Перебросить (доступен)
+                    </Button>
+                  )}
+                  
+                  <Button
+                    onClick={() => setShowShop(true)}
+                    variant="outline"
+                    size="lg"
+                    className="w-full h-14 text-lg font-semibold border-accent/50 hover:bg-accent/10"
+                  >
+                    <Icon name="ShoppingCart" className="mr-2" size={20} />
+                    Магазин бафов
+                  </Button>
+                </div>
+
+                {buffs.some(b => b.active) && (
+                  <div className="w-full max-w-xs space-y-2 animate-fade-in">
+                    <p className="text-sm text-muted-foreground text-center">Активные бафы:</p>
+                    <div className="flex flex-wrap gap-2 justify-center">
+                      {buffs.filter(b => b.active).map(buff => (
+                        <div key={buff.id} className="bg-accent/20 border border-accent/30 px-3 py-1 rounded-lg flex items-center gap-2">
+                          <Icon name={buff.icon as any} size={16} className="text-accent" />
+                          <span className="text-sm font-medium">{buff.name}</span>
+                          <span className="text-xs text-muted-foreground">({buff.remaining})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {rollCount > 0 && (
                   <div className="text-center animate-fade-in">
@@ -509,6 +623,64 @@ const Index = () => {
               Сохранить
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showShop} onOpenChange={setShowShop}>
+        <DialogContent className="bg-card border-primary/20 max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl text-center flex items-center justify-center gap-2">
+              <Icon name="ShoppingCart" size={28} />
+              Магазин бафов
+            </DialogTitle>
+            <DialogDescription className="text-center">
+              У вас: <span className="text-accent font-bold text-lg">{coins} <Icon name="Coins" className="inline" size={16} /></span> монет
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-4">
+            {buffs.map(buff => (
+              <Card key={buff.id} className={`p-4 ${buff.active ? 'bg-accent/10 border-accent/30' : 'bg-secondary border-primary/20'}`}>
+                <div className="flex items-start gap-3 mb-3">
+                  <div className={`p-2 rounded-lg ${buff.active ? 'bg-accent/20' : 'bg-primary/20'}`}>
+                    <Icon name={buff.icon as any} size={24} className={buff.active ? 'text-accent' : 'text-primary'} />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-bold text-lg flex items-center gap-2">
+                      {buff.name}
+                      {buff.active && (
+                        <span className="text-xs bg-accent/20 text-accent px-2 py-0.5 rounded">
+                          Активен ({buff.remaining})
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-sm text-muted-foreground">{buff.description}</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1 text-accent font-bold">
+                    <Icon name="Coins" size={18} />
+                    {buff.cost}
+                  </div>
+                  <Button
+                    onClick={() => buyBuff(buff.id)}
+                    disabled={buff.active || coins < buff.cost}
+                    size="sm"
+                    className="bg-primary hover:bg-primary/90"
+                  >
+                    {buff.active ? 'Активен' : coins < buff.cost ? 'Мало монет' : 'Купить'}
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+          
+          <div className="bg-primary/10 border border-primary/20 p-4 rounded-lg">
+            <p className="text-sm text-center text-muted-foreground">
+              💡 <strong>Совет:</strong> Зарабатывайте монеты за каждый бросок. За выпадение 10 получаете бонус +10 монет!
+            </p>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
